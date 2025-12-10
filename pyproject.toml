@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "distributed-neuro-sim"
+version = "0.1.0"
+description = "Spiking Neural Network Simulation with Brian2"
+requires-python = ">=3.8"
+dependencies = [
+    "brian2>=2.5.0",
+    "numpy>=1.20.0",
+    "matplotlib>=3.3.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+

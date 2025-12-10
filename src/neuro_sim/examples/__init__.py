@@ -1,0 +1,2 @@
+"""Example SNN simulations."""
+
