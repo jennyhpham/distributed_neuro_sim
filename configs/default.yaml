@@ -1,0 +1,46 @@
+# Default configuration for MNIST SNN training and inference
+
+model:
+  name: "DiehlAndCook2015"
+  n_neurons: 100
+  n_inpt: 784
+  exc: 22.5
+  inh: 120.0
+  theta_plus: 0.05
+  dt: 1.0
+  norm: 78.4
+  nu: [0.0001, 0.01]  # Learning rates [min, max] as floats
+  inpt_shape: [1, 28, 28]
+  w_dtype: "float32"
+  sparse: true
+
+training:
+  batch_size: 64
+  n_epochs: 2
+  n_train: 60000
+  n_updates: 10
+  time: 100
+  intensity: 128.0
+  progress_interval: 10
+  checkpoint_interval: 1  # Save checkpoint every N epochs
+  seed: 0
+  gpu: true
+
+inference:
+  batch_size: 32
+  n_test: 10000
+  time: 100
+  intensity: 128.0
+  gpu: true
+
+data:
+  dataset: "MNIST"
+  root: null  # Will use bindsnet default
+  n_workers: 8
+
+paths:
+  checkpoint_dir: "checkpoints"
+  model_dir: "models"
+  log_dir: "logs"
+  data_dir: "data"
+

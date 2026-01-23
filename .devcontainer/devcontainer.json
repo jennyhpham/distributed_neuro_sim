@@ -1,29 +1,42 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/python
 {
-	"name": "Python 3",
+	"name": "Python 3 with GPU Support",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
 	// "image": "mcr.microsoft.com/devcontainers/python:2-3.14-trixie",
 	"build": {
 		"dockerfile": "Dockerfile",
 		"context": ".."
 	},
+	"runArgs": [
+		"--gpus=all"
+	],
+	// Open the project itself as the workspace root
+	"workspaceFolder": "/workspaces/distributed_neuro_sim",
+	// Persist training artifacts across container rebuilds
+	"mounts": [
+		"source=neuro-sim-models,target=/workspaces/distributed_neuro_sim/models,type=volume",
+		"source=neuro-sim-checkpoints,target=/workspaces/distributed_neuro_sim/checkpoints,type=volume",
+		"source=neuro-sim-logs,target=/workspaces/distributed_neuro_sim/logs,type=volume",
+		"source=neuro-sim-data,target=/workspaces/distributed_neuro_sim/data,type=volume"
+	],
 	"features": {
 		"ghcr.io/nils-geistmann/devcontainers-features/zsh:0": {}
-	}
-
+	},
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	// "features": {},
-
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
-
 	// Use 'postCreateCommand' to run commands after the container is created.
-	// "postCreateCommand": "pip3 install --user -r requirements.txt",
-
+	"postCreateCommand": "pip install -e . --break-system-packages",
 	// Configure tool-specific properties.
-	// "customizations": {},
-
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"ms-python.python"
+			]
+		}
+	},
 	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
 	// "remoteUser": "root"
 }

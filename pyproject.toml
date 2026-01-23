@@ -5,13 +5,23 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "distributed-neuro-sim"
 version = "0.1.0"
-description = "Spiking Neural Network Simulation with Brian2"
+description = "Production-grade Spiking Neural Network Training and Inference System"
 requires-python = ">=3.8"
 dependencies = [
     "brian2>=2.5.0",
     "numpy>=1.20.0",
     "matplotlib>=3.3.0",
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "bindsnet>=0.2.7",
+    "tqdm>=4.65.0",
+    "pyyaml>=6.0",
 ]
+
+[project.scripts]
+neuro-sim-train = "neuro_sim.cli:train"
+neuro-sim-infer = "neuro_sim.cli:infer"
+neuro-sim = "neuro_sim.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
