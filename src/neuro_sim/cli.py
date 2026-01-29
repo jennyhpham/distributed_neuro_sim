@@ -26,10 +26,15 @@ def train_command(args):
             config = Config()
         
         # Override config with command-line arguments
+        if args.model:
+            config.set("model.name", args.model)
+            logger.info(f"Model type overridden by CLI: {args.model}")
         if args.batch_size:
             config.set("training.batch_size", args.batch_size)
         if args.n_epochs:
             config.set("training.n_epochs", args.n_epochs)
+        if args.n_train:
+            config.set("training.n_train", args.n_train)
         
         # Handle GPU setting: only override if explicitly set via CLI
         # Check if --gpu or --no-gpu was explicitly provided in command line
@@ -144,6 +149,13 @@ def train():
         help="Path to configuration file (YAML)",
     )
     parser.add_argument(
+        "--model",
+        type=str,
+        choices=["DiehlAndCook2015", "IncreasingInhibitionNetwork"],
+        default=None,
+        help="Model architecture to use (overrides config)",
+    )
+    parser.add_argument(
         "--batch-size",
         type=int,
         dest="batch_size",
@@ -154,6 +166,12 @@ def train():
         type=int,
         dest="n_epochs",
         help="Number of training epochs",
+    )
+    parser.add_argument(
+        "--n-train",
+        type=int,
+        dest="n_train",
+        help="Number of training samples (for quick testing, default from config)",
     )
     parser.add_argument(
         "--gpu",
@@ -296,6 +314,13 @@ def main():
         help="Path to configuration file (YAML)",
     )
     train_parser.add_argument(
+        "--model",
+        type=str,
+        choices=["DiehlAndCook2015", "IncreasingInhibitionNetwork"],
+        default=None,
+        help="Model architecture to use (overrides config)",
+    )
+    train_parser.add_argument(
         "--batch-size",
         type=int,
         dest="batch_size",
@@ -306,6 +331,12 @@ def main():
         type=int,
         dest="n_epochs",
         help="Number of training epochs",
+    )
+    train_parser.add_argument(
+        "--n-train",
+        type=int,
+        dest="n_train",
+        help="Number of training samples (for quick testing, default from config)",
     )
     train_parser.add_argument(
         "--gpu",

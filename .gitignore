@@ -215,7 +215,9 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-models/
-checkpoints/
-brian2/
+# Model files (large binaries - track specific models explicitly)
+/models/
+!/models/increasing_inhibition_network_400.pt
+
+/checkpoints/
 bindsnet/

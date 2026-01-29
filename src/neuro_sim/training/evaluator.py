@@ -6,31 +6,36 @@ import neuro_sim.compat  # noqa: F401
 import logging
 from pathlib import Path
 from time import time as t
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import torch
-from tqdm import tqdm
-
 from bindsnet.evaluation import all_activity
 import bindsnet.evaluation as bindsnet_eval
+from bindsnet.network import Network
+from bindsnet.network.monitors import Monitor
+from tqdm import tqdm
 
 # Patch proportion_weighting AFTER import to fix device handling
 neuro_sim.compat.patch_proportion_weighting()
 
 # Use the patched version from the module
 proportion_weighting = bindsnet_eval.proportion_weighting
-from bindsnet.models import DiehlAndCook2015
-from bindsnet.network.monitors import Monitor
 
 from neuro_sim.config import Config
 from neuro_sim.data.dataset import get_dataset, get_dataloader
+from neuro_sim.models import ModelFactory
 from neuro_sim.utils.model_persistence import ModelPersistence
 
 logger = logging.getLogger(__name__)
 
 
 class Evaluator:
-    """Evaluator for DiehlAndCook2015 SNN model on MNIST."""
+    """Evaluator for SNN models on MNIST.
+
+    Supports multiple model architectures through the ModelFactory pattern:
+    - DiehlAndCook2015: Standard STDP model with separate Ae/Ai layers
+    - IncreasingInhibitionNetwork: SOM-LM-SNN with distance-weighted inhibition
+    """
 
     def __init__(
         self,
@@ -46,13 +51,15 @@ class Evaluator:
         """
         self.config = config
         self.model_path = model_path
-        
+        self.model_wrapper = None
+        self.output_layer = None
+
         # Setup device
         self.device = self._setup_device()
-        
+
         # Load model
         self.network, self.assignments, self.proportions = self._load_model()
-        
+
         # Setup monitors
         self._setup_monitors()
     
@@ -68,156 +75,153 @@ class Evaluator:
         logger.info(f"Using device: {device}")
         return device
     
-    def _load_model(self) -> Tuple[DiehlAndCook2015, torch.Tensor, torch.Tensor]:
-        """Load trained model."""
+    def _load_model(self) -> Tuple[Network, torch.Tensor, torch.Tensor]:
+        """Load trained model using the ModelFactory pattern."""
         if self.model_path is None:
             model_dir = Path(self.config.paths["model_dir"])
             model_path = model_dir / "mnist_snn_model.pt"
         else:
             model_path = Path(self.model_path)
-        
+
         if not model_path.exists():
             raise FileNotFoundError(
                 f"Model not found: {model_path}. Please train the model first."
             )
-        
+
         logger.info(f"Loading model from: {model_path}")
         model_data = ModelPersistence.load_model(str(model_path), device=str(self.device))
-        
-        # Build network - config is nested, extract model config
+
+        # Build network using factory - config is nested, extract model config
         model_config = model_data["config"].get("model", model_data["config"])
         network = self._build_network(model_config)
-        
+
         # Load network weights if available (support both old and new format)
         weights = model_data.get("network_weights") or model_data.get("network_state")
         if weights:
-            # Load connection weights directly into connections (bindsnet stores weights in pipeline features)
-            for conn_name, connection in network.connections.items():
-                # Generate key for this connection
-                if isinstance(conn_name, tuple):
-                    key = f"{conn_name[0]}_to_{conn_name[1]}.w"
-                else:
-                    key = f"{conn_name}.w"
+            self._load_weights(network, weights)
 
-                if key in weights:
-                    weight_value = weights[key].to(self.device)
-                    # Try to set weight in pipeline feature (bindsnet 0.2.7)
-                    if hasattr(connection, "pipeline") and connection.pipeline:
-                        for feature in connection.pipeline:
-                            if hasattr(feature, "value"):
-                                # Match tensor type (sparse/dense) of the existing value
-                                if feature.value.is_sparse and not weight_value.is_sparse:
-                                    weight_value = weight_value.to_sparse()
-                                elif not feature.value.is_sparse and weight_value.is_sparse:
-                                    weight_value = weight_value.to_dense()
-                                feature.value.data = weight_value
-                                break
-                    # Fallback: try direct w attribute
-                    elif hasattr(connection, "w"):
-                        # Match tensor type (sparse/dense) of the existing w
-                        if connection.w.is_sparse and not weight_value.is_sparse:
-                            weight_value = weight_value.to_sparse()
-                        elif not connection.w.is_sparse and weight_value.is_sparse:
-                            weight_value = weight_value.to_dense()
-                        connection.w = weight_value
-
-            # Load theta (adaptive threshold) values if available
-            if "Ae.theta" in weights:
-                theta_value = weights["Ae.theta"].to(self.device)
-                # Theta values are already converted to mV in the checkpoint (done during conversion)
-                if "Ae" in network.layers and hasattr(network.layers["Ae"], "theta"):
-                    network.layers["Ae"].theta.data = theta_value
-                    logger.info(f"Loaded theta values: min={theta_value.min():.2f}mV, max={theta_value.max():.2f}mV, mean={theta_value.mean():.2f}mV")
-        
         assignments = model_data["assignments"]
         proportions = model_data["proportions"]
-        
+
         # Debug: Check assignments validity
         if isinstance(assignments, torch.Tensor):
             assignments = assignments.to(self.device)
             unique_assignments = torch.unique(assignments)
             valid_assignments = (assignments >= 0).sum().item()
-            logger.info(f"Loaded assignments: {assignments.shape[0]} neurons, {valid_assignments} assigned, "
-                       f"classes: {sorted(unique_assignments[unique_assignments >= 0].tolist())}")
+            logger.info(
+                f"Loaded assignments: {assignments.shape[0]} neurons, "
+                f"{valid_assignments} assigned, "
+                f"classes: {sorted(unique_assignments[unique_assignments >= 0].tolist())}"
+            )
             if valid_assignments == 0:
-                logger.error("WARNING: No neurons are assigned to any class! This will cause poor accuracy.")
+                logger.error(
+                    "WARNING: No neurons are assigned to any class! "
+                    "This will cause poor accuracy."
+                )
             if len(unique_assignments[unique_assignments >= 0]) < 10:
-                logger.warning(f"Only {len(unique_assignments[unique_assignments >= 0])} classes have assigned neurons (expected 10)")
-        
+                logger.warning(
+                    f"Only {len(unique_assignments[unique_assignments >= 0])} "
+                    f"classes have assigned neurons (expected 10)"
+                )
+
         if isinstance(proportions, torch.Tensor):
             proportions = proportions.to(self.device)
-        
+
         logger.info("Model loaded successfully")
         return network, assignments, proportions
+
+    def _load_weights(self, network: Network, weights: Dict[str, Any]) -> None:
+        """Load weights into the network.
+
+        Args:
+            network: The network to load weights into
+            weights: Dictionary of weight tensors from checkpoint
+        """
+        # Load connection weights directly into connections
+        for conn_name, connection in network.connections.items():
+            # Generate key for this connection
+            if isinstance(conn_name, tuple):
+                key = f"{conn_name[0]}_to_{conn_name[1]}.w"
+            else:
+                key = f"{conn_name}.w"
+
+            if key in weights:
+                weight_value = weights[key].to(self.device)
+                # Try to set weight in pipeline feature (bindsnet 0.2.7)
+                if hasattr(connection, "pipeline") and connection.pipeline:
+                    for feature in connection.pipeline:
+                        if hasattr(feature, "value"):
+                            # Match tensor type (sparse/dense) of the existing value
+                            if feature.value.is_sparse and not weight_value.is_sparse:
+                                weight_value = weight_value.to_sparse()
+                            elif not feature.value.is_sparse and weight_value.is_sparse:
+                                weight_value = weight_value.to_dense()
+                            feature.value.data = weight_value
+                            break
+                # Fallback: try direct w attribute
+                elif hasattr(connection, "w") and connection.w is not None:
+                    # Match tensor type (sparse/dense) of the existing w
+                    if connection.w.is_sparse and not weight_value.is_sparse:
+                        weight_value = weight_value.to_sparse()
+                    elif not connection.w.is_sparse and weight_value.is_sparse:
+                        weight_value = weight_value.to_dense()
+                    # Use .data to update Parameter values
+                    connection.w.data = weight_value
+
+        # Load theta (adaptive threshold) values if available
+        # Try model-specific output layer first, then fallback to "Ae" for backwards compat
+        theta_key = f"{self.output_layer}.theta"
+        fallback_theta_key = "Ae.theta"
+
+        theta_loaded = False
+        for key in [theta_key, fallback_theta_key]:
+            if key in weights:
+                theta_value = weights[key].to(self.device)
+                layer_name = key.split(".")[0]
+                if layer_name in network.layers and hasattr(network.layers[layer_name], "theta"):
+                    network.layers[layer_name].theta.data = theta_value
+                    logger.info(
+                        f"Loaded theta values for {layer_name}: "
+                        f"min={theta_value.min():.2f}mV, "
+                        f"max={theta_value.max():.2f}mV, "
+                        f"mean={theta_value.mean():.2f}mV"
+                    )
+                    theta_loaded = True
+                    break
+
+        if not theta_loaded:
+            logger.debug("No theta values found in checkpoint")
     
-    def _build_network(self, model_config: Dict) -> DiehlAndCook2015:
-        """Build the network model."""
+    def _build_network(self, model_config: Dict) -> Network:
+        """Build the network model using the factory pattern.
+
+        Args:
+            model_config: Model configuration dictionary
+
+        Returns:
+            Built network ready for inference
+        """
         inference_config = self.config.inference
 
-        w_dtype_str = model_config.get("w_dtype", "float32")
-        try:
-            w_dtype = getattr(torch, w_dtype_str)
-        except AttributeError:
-            logger.warning(f"Unsupported w_dtype '{w_dtype_str}', defaulting to float32")
-            w_dtype = torch.float32
+        # Create model wrapper using factory
+        self.model_wrapper = ModelFactory.create(model_config, self.device)
+        self.output_layer = self.model_wrapper.output_layer
 
-        # Disable learning during inference to avoid dimension mismatches with pretrained weights
-        # and unnecessary computation. Set nu=(0, 0) to turn off STDP learning.
-        logger.info("Building network with learning disabled (nu=(0, 0)) for inference")
-        network = DiehlAndCook2015(
-            device=self.device,
-            batch_size=inference_config["batch_size"],
-            sparse=bool(model_config.get("sparse", False)),
-            n_inpt=model_config["n_inpt"],
-            n_neurons=model_config["n_neurons"],
-            exc=model_config["exc"],
-            inh=model_config["inh"],
-            dt=model_config["dt"],
-            norm=model_config["norm"],
-            nu=(0.0, 0.0),  # Disable learning during inference
-            theta_plus=model_config["theta_plus"],
-            inpt_shape=tuple(model_config["inpt_shape"]),
-            w_dtype=w_dtype,
-            inh_thresh=model_config.get("inh_thresh", -40.0),
-            exc_thresh=model_config.get("exc_thresh", -52.0),
+        logger.info(
+            f"Building {self.model_wrapper.model_name} network with "
+            f"learning disabled for inference (output layer: {self.output_layer})"
         )
-        
-        # Move network to device after creation
-        if self.device.type == "cuda":
-            network.to("cuda")
-            # Explicitly move connection weights and pipeline features to GPU
-            # bindsnet's network.to() doesn't always move pipeline feature .value attributes
-            for conn_name, connection in network.connections.items():
-                # Move connection weights
-                if hasattr(connection, 'w') and isinstance(connection.w, torch.Tensor):
-                    connection.w = connection.w.to(self.device)
-                # Move pipeline features (like Weight objects with .value)
-                if hasattr(connection, 'pipeline'):
-                    for feature in connection.pipeline:
-                        # Move feature value
-                        if hasattr(feature, 'value') and isinstance(feature.value, torch.Tensor):
-                            feature.value = feature.value.to(self.device)
-                        # Move learning rule tensor attributes (like feature_value, nu)
-                        if hasattr(feature, 'learning_rule'):
-                            learning_rule = feature.learning_rule
-                            for attr_name in dir(learning_rule):
-                                if not attr_name.startswith('_'):
-                                    try:
-                                        attr = getattr(learning_rule, attr_name)
-                                        if isinstance(attr, torch.Tensor) and attr.device.type != self.device.type:
-                                            setattr(learning_rule, attr_name, attr.to(self.device))
-                                    except (AttributeError, RuntimeError):
-                                        pass
-                        # Also move any other tensor attributes in features
-                        for attr_name in dir(feature):
-                            if not attr_name.startswith('_') and attr_name not in ['value', 'learning_rule']:
-                                try:
-                                    attr = getattr(feature, attr_name)
-                                    if isinstance(attr, torch.Tensor) and attr.device.type != self.device.type:
-                                        setattr(feature, attr_name, attr.to(self.device))
-                                except (AttributeError, RuntimeError):
-                                    pass
-        
+
+        # Build network with learning disabled (learning_enabled=False sets nu=(0,0))
+        network = self.model_wrapper.build(
+            batch_size=inference_config["batch_size"],
+            learning_enabled=False,
+            sparse=bool(model_config.get("sparse", False)),
+        )
+
+        # Move network to device
+        self.model_wrapper.move_to_device(network)
+
         return network
     
     def _setup_monitors(self):
@@ -277,6 +281,7 @@ class Evaluator:
             shuffle=False,
             num_workers=self.config.data["n_workers"],
             pin_memory=self.device.type == "cuda",
+            persistent_workers=self.config.data["n_workers"] > 0,  # Keep workers alive for faster loading
         )
         
         n_test = inference_config["n_test"]
@@ -288,7 +293,8 @@ class Evaluator:
         
         for step, batch in enumerate(test_dataloader):
             # Get actual batch size (may be smaller for last batch)
-            actual_batch_size = batch["encoded_image"].shape[0]
+            # PoissonEncoder output shape is (time, batch, ...), so batch dim is index 1
+            actual_batch_size = batch["encoded_image"].shape[1]
             expected_batch_size = inference_config["batch_size"]
             
             # Skip incomplete batches to avoid batch size mismatch
@@ -312,8 +318,8 @@ class Evaluator:
             # Run network
             self.network.run(inputs=inputs, time=inference_config["time"])
             
-            # Get spike record
-            spike_record = self.spikes["Ae"].get("s").permute((1, 0, 2))
+            # Get spike record from the output layer
+            spike_record = self.spikes[self.output_layer].get("s").permute((1, 0, 2))
             # Ensure everything used by BindsNET evaluators is on the same device.
             # Some Monitor outputs can remain on CPU even if the network runs on CUDA.
             spike_record = spike_record.to(self.device)
@@ -437,9 +443,9 @@ class Evaluator:
         
         # Run network
         self.network.run(inputs=inputs, time=inference_config["time"])
-        
-        # Get spike record
-        spike_record = self.spikes["Ae"].get("s").permute((1, 0, 2))
+
+        # Get spike record from the output layer
+        spike_record = self.spikes[self.output_layer].get("s").permute((1, 0, 2))
         spike_record = spike_record.to(self.device)
         
         # Only use the actual batch size (slice out padding)

@@ -42,8 +42,12 @@ class ModelPersistence:
         # Extract only weights directly from connections, not batch-specific neuron states
         weights_state_dict = ModelPersistence._get_weights_state_dict(network)
         
+        # Extract model type from config for backwards compatibility
+        model_type = config.get("model", {}).get("name", "DiehlAndCook2015")
+
         checkpoint = {
             "epoch": epoch,
+            "model_type": model_type,  # Explicit model type for backwards compatibility
             "network_state": weights_state_dict,
             "assignments": assignments.cpu() if isinstance(assignments, torch.Tensor) else assignments,
             "proportions": proportions.cpu() if isinstance(proportions, torch.Tensor) else proportions,
@@ -170,11 +174,15 @@ class ModelPersistence:
         """
         model_path = Path(model_path)
         model_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Extract only weights directly from connections, not batch-specific neuron states
         weights_state_dict = ModelPersistence._get_weights_state_dict(network)
-        
+
+        # Extract model type from config for backwards compatibility
+        model_type = config.get("model", {}).get("name", "DiehlAndCook2015")
+
         model_data = {
+            "model_type": model_type,  # Explicit model type for backwards compatibility
             "network_state": weights_state_dict,
             "assignments": assignments.cpu() if isinstance(assignments, torch.Tensor) else assignments,
             "proportions": proportions.cpu() if isinstance(proportions, torch.Tensor) else proportions,

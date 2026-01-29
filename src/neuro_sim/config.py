@@ -58,6 +58,9 @@ class Config:
                 "inpt_shape": [1, 28, 28],
                 "w_dtype": "float32",
                 "sparse": False,
+                # IncreasingInhibitionNetwork (SOM-LM-SNN) specific parameters
+                "start_inhib": 10.0,  # Starting inhibition strength
+                "max_inhib": -40.0,  # Maximum inhibition (negative for inhibitory)
             },
             "training": {
                 "batch_size": 32,
@@ -69,6 +72,10 @@ class Config:
                 "progress_interval": 10,
                 "seed": 0,
                 "gpu": True,
+                # IncreasingInhibitionNetwork (SOM-LM-SNN) specific parameters
+                "update_inhibition_interval": 500,  # Update inhibition every N samples
+                "min_spikes": 2,  # Minimum spikes required before retry
+                "max_retries": 5,  # Maximum retry attempts per sample
             },
             "inference": {
                 "batch_size": 32,

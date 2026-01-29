@@ -1,0 +1,54 @@
+# SOM-LM-SNN (IncreasingInhibitionNetwork) configuration for MNIST training
+# Based on: https://www.frontiersin.org/articles/10.3389/fncom.2015.00099/full
+# with Self-Organizing Maps property by Teuvo Kohonen
+
+model:
+  name: "IncreasingInhibitionNetwork"
+  n_neurons: 400
+  n_inpt: 784
+  exc: 22.5
+  inh: 17.5
+  theta_plus: 0.05
+  dt: 1.0
+  norm: 78.4
+  nu: [0.0001, 0.01]  # Learning rates [min, max]
+  inpt_shape: [1, 28, 28]
+  w_dtype: "float32"
+  sparse: false  # SOM-LM-SNN doesn't work well with sparse tensors
+  # SOM-LM-SNN specific parameters
+  start_inhib: 10.0    # Initial inhibition strength for Y->Y recurrent connection
+  max_inhib: -40.0     # Maximum (most negative) inhibition value
+
+training:
+  batch_size: 1  # REQUIRED: SOM-LM-SNN must use batch_size=1 for proper STDP
+  n_epochs: 1
+  n_train: 60000
+  n_updates: 250  # More frequent updates for single-sample training
+  time: 100       # Presentation time per sample (ms)
+  intensity: 64.0  # Lower intensity than DiehlAndCook (64 vs 128)
+  progress_interval: 10
+  checkpoint_interval: 1
+  seed: 0
+  gpu: true
+  # SOM-LM-SNN specific training parameters
+  update_inhibition_interval: 500  # Increase inhibition every N samples
+  min_spikes: 2    # Minimum spikes required per sample
+  max_retries: 5   # Max retry attempts when spikes < min_spikes
+
+inference:
+  batch_size: 1  # Must match training batch size
+  n_test: 10000
+  time: 100
+  intensity: 64.0  # Must match training intensity
+  gpu: true
+
+data:
+  dataset: "MNIST"
+  root: null
+  n_workers: 0  # batch_size=1 doesn't benefit from multiple workers
+
+paths:
+  checkpoint_dir: "checkpoints"
+  model_dir: "models"
+  log_dir: "logs"
+  data_dir: "data"

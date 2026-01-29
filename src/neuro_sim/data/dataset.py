@@ -73,6 +73,7 @@ def get_dataloader(
     shuffle: bool = True,
     num_workers: int = -1,
     pin_memory: bool = False,
+    persistent_workers: bool = False,
 ) -> DataLoader:
     """
     Get DataLoader for dataset.
@@ -82,14 +83,18 @@ def get_dataloader(
         batch_size: Batch size
         shuffle: Whether to shuffle
         num_workers: Number of worker processes (-1 for auto)
-        pin_memory: Whether to pin memory
+        pin_memory: Whether to pin memory (faster GPU transfers)
+        persistent_workers: Whether to keep workers alive between epochs (not supported by bindsnet DataLoader)
 
     Returns:
         DataLoader instance
     """
     if num_workers == -1:
         num_workers = 0
-    
+
+    # Note: bindsnet.datasets.DataLoader doesn't support persistent_workers parameter,
+    # so we don't pass it
+
     dataloader = DataLoader(
         dataset,
         batch_size=batch_size,
@@ -97,6 +102,6 @@ def get_dataloader(
         num_workers=num_workers,
         pin_memory=pin_memory,
     )
-    
+
     return dataloader
 
