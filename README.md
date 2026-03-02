@@ -11,6 +11,22 @@ A production-grade application for training and running inference with Spiking N
 - **Inference Pipeline**: Easy-to-use inference interface for predictions
 - **Logging**: Comprehensive logging with file and console output
 
+## Prerequisites
+
+**Git LFS** is required to download model files (`*.pt`). If you clone the repo and get an error like `invalid load key, 'v'` when loading a model, it means Git LFS was not set up and the file is just a pointer stub.
+
+```bash
+# Install git-lfs (once per machine)
+sudo apt-get install git-lfs   # Ubuntu/Debian
+# brew install git-lfs         # macOS
+
+# Then initialize and pull the actual model files
+git lfs install
+git lfs pull
+```
+
+Or just run `./setup.sh`, which handles this automatically.
+
 ## Installation
 
 Install the package in development mode:

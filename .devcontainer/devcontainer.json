@@ -18,7 +18,8 @@
 		"source=neuro-sim-models,target=/workspaces/distributed_neuro_sim/models,type=volume",
 		"source=neuro-sim-checkpoints,target=/workspaces/distributed_neuro_sim/checkpoints,type=volume",
 		"source=neuro-sim-logs,target=/workspaces/distributed_neuro_sim/logs,type=volume",
-		"source=neuro-sim-data,target=/workspaces/distributed_neuro_sim/data,type=volume"
+		"source=neuro-sim-data,target=/workspaces/distributed_neuro_sim/data,type=volume",
+		"source=neuro-sim-claude,target=/root/.claude,type=volume"
 	],
 	"features": {
 		"ghcr.io/nils-geistmann/devcontainers-features/zsh:0": {}
@@ -28,12 +29,13 @@
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
 	// Use 'postCreateCommand' to run commands after the container is created.
-	"postCreateCommand": "pip install -e . --break-system-packages",
+	"postCreateCommand": "bash setup.sh",
 	// Configure tool-specific properties.
 	"customizations": {
 		"vscode": {
 			"extensions": [
-				"ms-python.python"
+				"ms-python.python",
+				"Anthropic.claude-code"
 			]
 		}
 	},
