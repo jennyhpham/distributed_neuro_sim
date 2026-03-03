@@ -1,0 +1,233 @@
+"""Benchmark script for the neuro-sim inference API.
+
+Sends MNIST test images to a running neuro-sim container and collects
+latency, accuracy, and spike-count metrics. Designed to be re-run at
+different Docker resource limits (--cpus, --memory) to produce the
+thesis comparison data.
+
+Usage:
+    python scripts/benchmark.py
+    python scripts/benchmark.py --url http://localhost:8000 --n-runs 20
+    python scripts/benchmark.py --n-runs 50 --output-json results/run_0.5cpu.json
+"""
+
+import argparse
+import io
+import json
+import statistics
+import sys
+import time
+from pathlib import Path
+
+import requests
+from PIL import Image
+from torchvision.datasets import MNIST
+from torchvision import transforms
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def load_one_per_digit(data_dir: str = "/tmp/mnist_benchmark") -> list[dict]:
+    """Return one (image_bytes, true_label) per digit class 0–9 from MNIST test set."""
+    dataset = MNIST(
+        root=data_dir,
+        train=False,
+        download=True,
+        transform=transforms.ToTensor(),
+    )
+
+    samples = {}
+    for img_tensor, label in dataset:
+        if label not in samples:
+            # Convert tensor → PIL → PNG bytes
+            pil_img = transforms.ToPILImage()(img_tensor)
+            buf = io.BytesIO()
+            pil_img.save(buf, format="PNG")
+            samples[label] = {"image_bytes": buf.getvalue(), "label": label}
+        if len(samples) == 10:
+            break
+
+    return [samples[i] for i in range(10)]
+
+
+def check_health(url: str) -> dict:
+    resp = requests.get(f"{url}/health", timeout=10)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def predict(url: str, image_bytes: bytes) -> dict:
+    resp = requests.post(
+        f"{url}/predict",
+        files={"file": ("image.png", image_bytes, "image/png")},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+def percentile(data: list[float], p: int) -> float:
+    sorted_data = sorted(data)
+    idx = int(len(sorted_data) * p / 100)
+    return sorted_data[min(idx, len(sorted_data) - 1)]
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def run_benchmark(url: str, n_runs: int, output_json: str | None):
+    print(f"\n{'='*60}")
+    print(f"  neuro-sim SNN Inference Benchmark")
+    print(f"{'='*60}")
+    print(f"  Target : {url}")
+    print(f"  Runs   : {n_runs} per digit × 10 digits = {n_runs * 10} total requests")
+
+    # Health check
+    print("\n[1/3] Health check...", end=" ", flush=True)
+    try:
+        health = check_health(url)
+    except Exception as e:
+        print(f"FAILED\n  {e}")
+        print("  Is the container running? docker run --rm -p 8000:8000 neuro-sim:latest")
+        sys.exit(1)
+
+    print("OK")
+    print(f"       Model    : {health['model']}")
+    print(f"       Neurons  : {health['n_neurons']}")
+    print(f"       Sim window: {health['simulation_time_ms']} ms (neuromorphic floor latency)")
+    print(f"       Device   : {health['device']}")
+
+    # Load MNIST samples
+    print("\n[2/3] Loading MNIST test samples...", end=" ", flush=True)
+    samples = load_one_per_digit()
+    print(f"OK ({len(samples)} images, one per digit class)")
+
+    # Run benchmark
+    print(f"\n[3/3] Running {n_runs * 10} requests...\n")
+
+    results = []
+    all_latencies = []
+    correct_proportion = 0
+    correct_all_activity = 0
+    total = 0
+
+    wall_start = time.perf_counter()
+
+    for sample in samples:
+        label = sample["label"]
+        latencies = []
+        spike_counts = []
+
+        for run in range(n_runs):
+            result = predict(url, sample["image_bytes"])
+            latencies.append(result["inference_time_ms"])
+            spike_counts.append(result["spike_count"])
+
+            if run == 0:  # Only count accuracy once per digit
+                if result["digit"] == label:
+                    correct_proportion += 1
+                if result["all_activity_digit"] == label:
+                    correct_all_activity += 1
+                total += 1
+
+            all_latencies.append(result["inference_time_ms"])
+
+        results.append({
+            "digit": label,
+            "predicted_proportion": result["digit"],
+            "predicted_all_activity": result["all_activity_digit"],
+            "correct_proportion": result["digit"] == label,
+            "correct_all_activity": result["all_activity_digit"] == label,
+            "latency_ms": {
+                "min": round(min(latencies), 2),
+                "mean": round(statistics.mean(latencies), 2),
+                "max": round(round(max(latencies), 2), 2),
+            },
+            "mean_spike_count": round(statistics.mean(spike_counts), 1),
+        })
+
+        status = "✓" if result["digit"] == label else "✗"
+        print(
+            f"  Digit {label}: {status} predicted={result['digit']} "
+            f"| latency mean={statistics.mean(latencies):.1f}ms "
+            f"| spikes mean={statistics.mean(spike_counts):.1f}"
+        )
+
+    wall_elapsed = time.perf_counter() - wall_start
+
+    # Summary
+    sim_time_ms = health["simulation_time_ms"]
+    p50 = percentile(all_latencies, 50)
+    p95 = percentile(all_latencies, 95)
+    p99 = percentile(all_latencies, 99)
+    overhead = p50 - sim_time_ms  # latency beyond the neuromorphic floor
+
+    print(f"\n{'='*60}")
+    print(f"  RESULTS SUMMARY")
+    print(f"{'='*60}")
+    print(f"  Accuracy (proportion-weighting) : {correct_proportion}/{total} = {correct_proportion/total*100:.0f}%")
+    print(f"  Accuracy (all-activity)         : {correct_all_activity}/{total} = {correct_all_activity/total*100:.0f}%")
+    print(f"\n  Latency (wall-clock per request):")
+    print(f"    min  : {min(all_latencies):.1f} ms")
+    print(f"    p50  : {p50:.1f} ms")
+    print(f"    p95  : {p95:.1f} ms")
+    print(f"    p99  : {p99:.1f} ms")
+    print(f"    max  : {max(all_latencies):.1f} ms")
+    print(f"\n  Neuromorphic floor (sim window) : {sim_time_ms} ms (fixed by SNN)")
+    print(f"  Orchestration overhead (p50)    : {overhead:.1f} ms  [= p50 - floor]")
+    print(f"\n  Total wall time : {wall_elapsed:.1f}s for {len(all_latencies)} requests")
+    print(f"  Throughput      : {len(all_latencies)/wall_elapsed:.2f} req/s")
+    print(f"{'='*60}\n")
+
+    # Save JSON output
+    output = {
+        "config": {
+            "url": url,
+            "n_runs_per_digit": n_runs,
+            "total_requests": len(all_latencies),
+            "model": health["model"],
+            "n_neurons": health["n_neurons"],
+            "simulation_time_ms": sim_time_ms,
+        },
+        "accuracy": {
+            "proportion_weighting": round(correct_proportion / total, 4),
+            "all_activity": round(correct_all_activity / total, 4),
+        },
+        "latency_ms": {
+            "min": round(min(all_latencies), 2),
+            "p50": round(p50, 2),
+            "p95": round(p95, 2),
+            "p99": round(p99, 2),
+            "max": round(max(all_latencies), 2),
+            "neuromorphic_floor": sim_time_ms,
+            "overhead_p50": round(overhead, 2),
+        },
+        "throughput_req_per_sec": round(len(all_latencies) / wall_elapsed, 3),
+        "per_digit": results,
+        "raw_latencies_ms": [round(l, 2) for l in all_latencies],
+    }
+
+    if output_json:
+        out_path = Path(output_json)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(output, indent=2))
+        print(f"  Raw results saved to: {output_json}")
+
+    return output
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Benchmark the neuro-sim inference API")
+    parser.add_argument("--url", default="http://localhost:8000", help="Base URL of the running server")
+    parser.add_argument("--n-runs", type=int, default=10, help="Number of requests per digit (default: 10)")
+    parser.add_argument("--output-json", metavar="PATH", help="Save full results to a JSON file")
+    args = parser.parse_args()
+
+    run_benchmark(url=args.url, n_runs=args.n_runs, output_json=args.output_json)
+
+
+if __name__ == "__main__":
+    main()

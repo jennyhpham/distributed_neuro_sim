@@ -1,0 +1,18 @@
+# Exclude training artifacts
+checkpoints/
+logs/
+data/
+
+# Exclude dev tooling
+.devcontainer/
+.git/
+.github/
+bindsnet/
+scripts/
+docs/
+
+# Exclude Python cache
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+src/**/*.egg-info/

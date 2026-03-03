@@ -19,7 +19,8 @@
 		"source=neuro-sim-checkpoints,target=/workspaces/distributed_neuro_sim/checkpoints,type=volume",
 		"source=neuro-sim-logs,target=/workspaces/distributed_neuro_sim/logs,type=volume",
 		"source=neuro-sim-data,target=/workspaces/distributed_neuro_sim/data,type=volume",
-		"source=neuro-sim-claude,target=/root/.claude,type=volume"
+		"source=neuro-sim-claude,target=/root/.claude,type=volume",
+		"source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind"
 	],
 	"features": {
 		"ghcr.io/nils-geistmann/devcontainers-features/zsh:0": {}

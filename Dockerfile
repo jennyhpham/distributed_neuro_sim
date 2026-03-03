@@ -29,16 +29,15 @@ COPY configs/ ./configs/
 RUN pip install --no-cache-dir -e .
 
 # Bake the trained model into the image
-COPY models/ ./models/
+COPY models/increasing_inhibition_network_400.pt ./models/
 
 # Runtime directories for logs and MNIST test data
 RUN mkdir -p /data/logs /data/mnist
 
-# Exposed for the worker API server added later
 EXPOSE 8000
 
-# Default: run inference with the pre-trained model
-# CMD is overridden in K8s manifests for worker and master roles
-CMD ["neuro-sim-infer", \
-     "--model-path", "/app/models/increasing_inhibition_network_400.pt", \
-     "--log-dir", "/data/logs"]
+# Run the FastAPI inference server
+# Override NEURO_SIM_CONFIG / NEURO_SIM_MODEL env vars to swap model at deploy time
+CMD ["uvicorn", "neuro_sim.api.server:app", \
+     "--host", "0.0.0.0", "--port", "8000", \
+     "--workers", "1", "--log-level", "info"]
