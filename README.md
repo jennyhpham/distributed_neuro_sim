@@ -9,6 +9,9 @@ A production-grade application for training and running inference with Spiking N
 - **Model Persistence**: Save and load trained models and checkpoints
 - **Training Pipeline**: Full training loop with progress tracking and checkpointing
 - **Inference Pipeline**: Easy-to-use inference interface for predictions
+- **HTTP Inference API**: FastAPI server with `/predict`, `/health`, and `/metrics` endpoints
+- **Container Packaging**: Docker image with resource-constraint flags for edge simulation
+- **Benchmark Suite**: Latency, accuracy, and throughput measurement across deployment scenarios
 - **Logging**: Comprehensive logging with file and console output
 
 ## Prerequisites
@@ -90,6 +93,119 @@ Run inference with a specific model:
 ```bash
 neuro-sim-infer --model-path models/mnist_snn_model.pt
 ```
+
+## Container Deployment
+
+### Build
+
+```bash
+docker build -t neuro-sim:latest .
+```
+
+> **Note:** The image is large (~9 GB) due to the PyTorch CPU runtime. This is expected and is itself a finding for the thesis — it reflects the real overhead of packaging a framework-heavy neuromorphic workload.
+
+### Run — baseline (no resource limits)
+
+```bash
+docker run --rm -p 8000:8000 neuro-sim:latest
+```
+
+### Run — resource-constrained (edge simulation)
+
+Use `--cpus` and `--memory` to approximate edge hardware limits:
+
+```bash
+# Simulate a mid-tier edge node
+docker run --rm -p 8000:8000 \
+  --cpus="0.5" --memory="512m" --memory-swap="512m" \
+  neuro-sim:latest
+
+# Simulate a constrained edge node
+docker run --rm -p 8000:8000 \
+  --cpus="0.25" --memory="256m" --memory-swap="256m" \
+  neuro-sim:latest
+```
+
+Once the server is running, the API is available at `http://localhost:8000`.
+
+### API endpoints
+
+| Endpoint | Method | Description |
+| --- | --- | --- |
+| `/predict` | POST | Upload a grayscale MNIST image, returns predicted digit and inference metadata |
+| `/health` | GET | Liveness check — returns `{"status": "ok"}` when the model is loaded |
+| `/metrics` | GET | Prometheus-formatted metrics (request count, latency histograms) |
+
+**Example `/predict` call:**
+
+```bash
+curl -X POST http://localhost:8000/predict \
+  -F "file=@path/to/digit.png"
+```
+
+**Response:**
+
+```json
+{
+  "digit": 7,
+  "all_activity_digit": 7,
+  "inference_time_ms": 72.4,
+  "simulation_time_ms": 68.1,
+  "spike_count": 143
+}
+```
+
+---
+
+## Benchmarking
+
+Two scripts are provided under `scripts/` to measure performance across deployment scenarios.
+
+### `scripts/benchmark.py` — single scenario
+
+Runs N inference requests against a live container and reports latency percentiles, accuracy, and throughput.
+
+```bash
+# Requires: container already running on localhost:8000
+python scripts/benchmark.py \
+  --url http://localhost:8000 \
+  --n-runs 20 \
+  --output-json results/run.json
+```
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--url` | `http://localhost:8000` | Base URL of the running API server |
+| `--n-runs` | `20` | Number of inference requests per digit class (×10 digits = total requests) |
+| `--output-json` | *(none)* | Optional path to write full results as JSON |
+
+**Output includes:**
+- Accuracy (proportion-weighted and all-activity)
+- Latency: min, p50, p95, p99, max
+- Neuromorphic floor latency (irreducible simulation cost)
+- Throughput (requests/second)
+- Per-digit spike counts
+
+### `scripts/run_benchmarks.sh` — all three scenarios automated
+
+Builds and runs all three deployment scenarios back-to-back, saves results to `results/`.
+
+```bash
+# Default: 20 runs per digit per scenario
+./scripts/run_benchmarks.sh
+
+# Custom run count
+./scripts/run_benchmarks.sh --n-runs 50
+```
+
+Scenarios run in order:
+1. **Baseline** — no resource limits → `results/baseline.json`
+2. **0.5 CPU / 512 MB** — `results/constrained_0.5cpu.json`
+3. **0.25 CPU / 256 MB** — `results/constrained_0.25cpu.json`
+
+The script handles container startup, health-check polling, and teardown automatically between scenarios.
+
+---
 
 ## Configuration
 
@@ -193,6 +309,8 @@ distributed-neuro-sim/
 │       ├── cli.py                   # CLI entry points
 │       ├── compat.py                # Compatibility patches
 │       ├── main.py                  # Main entry point
+│       ├── api/
+│       │   └── server.py            # FastAPI inference server
 │       ├── data/
 │       │   └── dataset.py           # Data loading utilities
 │       ├── training/
@@ -203,15 +321,21 @@ distributed-neuro-sim/
 │       │   └── model_persistence.py # Model save/load
 │       └── models/
 ├── scripts/
-│   └── batch_eth_mnist.py          # Original BindsNET reference script
+│   ├── benchmark.py                 # Single-scenario latency/accuracy benchmark
+│   ├── run_benchmarks.sh            # Automated multi-scenario benchmark runner
+│   └── batch_eth_mnist.py           # Original BindsNET reference script
+├── results/                         # Benchmark output JSON files
 ├── configs/
-│   └── default.yaml
+│   ├── default.yaml                 # DiehlAndCook2015 config
+│   └── som_lm_snn.yaml              # IncreasingInhibitionNetwork config
 ├── docs/
 │   └── strategy.md
-├── checkpoints/                    # Training checkpoints (gitignored)
-├── models/                         # Saved models (gitignored)
-├── logs/                           # Log files (gitignored)
-├── data/                           # Datasets (gitignored)
+├── Dockerfile                       # Production container (uvicorn entrypoint)
+├── .dockerignore
+├── checkpoints/                     # Training checkpoints (gitignored)
+├── models/                          # Saved models (gitignored)
+├── logs/                            # Log files (gitignored)
+├── data/                            # Datasets (gitignored)
 ├── requirements.txt
 ├── pyproject.toml
 └── README.md
@@ -219,6 +343,7 @@ distributed-neuro-sim/
 
 ## Dependencies
 
+**Core SNN simulation:**
 - `torch>=2.0.0` - PyTorch
 - `torchvision>=0.15.0` - Vision datasets and transforms
 - `bindsnet>=0.2.7` - Spiking neural network simulation (0.2.x API)
@@ -226,3 +351,10 @@ distributed-neuro-sim/
 - `matplotlib>=3.3.0` - Plotting
 - `tqdm>=4.65.0` - Progress bars
 - `pyyaml>=6.0` - YAML config parsing
+
+**API server:**
+- `fastapi>=0.110.0` - HTTP API framework
+- `uvicorn[standard]>=0.29.0` - ASGI server
+- `python-multipart>=0.0.9` - File upload support
+- `pillow>=10.0.0` - Image decoding for `/predict`
+- `prometheus-fastapi-instrumentator>=7.0.0` - Prometheus metrics endpoint
