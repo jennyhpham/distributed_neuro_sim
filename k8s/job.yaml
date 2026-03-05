@@ -1,0 +1,27 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: neuro-infer
+  namespace: neuro-sim
+spec:
+  template:
+    spec:
+      containers:
+        - name: neuro-sim
+          image: neuro-sim:latest
+          imagePullPolicy: Never   # use image imported via k3d image import
+          command:
+            - neuro-sim-infer
+            - --model-path
+            - /app/models/increasing_inhibition_network_400.pt
+            - --log-dir
+            - /data/logs
+          volumeMounts:
+            - name: logs
+              mountPath: /data/logs
+      volumes:
+        - name: logs
+          persistentVolumeClaim:
+            claimName: neuro-sim-logs
+      restartPolicy: Never
+  backoffLimit: 2
