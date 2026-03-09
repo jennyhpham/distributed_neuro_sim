@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: neuro-sim-svc
+  namespace: neuro-sim
+spec:
+  # The Service finds pods by this label.
+  # It matches the labels.app=neuro-sim set in deployment.yaml.
+  # If you scale to 3 pods, all 3 have this label — the Service automatically
+  # load balances across all of them with no extra configuration needed.
+  selector:
+    app: neuro-sim
+  ports:
+      # The port the Service exposes to the outside world.
+      # Your benchmark script and curl commands hit this port.
+    - name: http
+      port: 80
+      # The port your FastAPI server is actually listening on inside the container.
+      # The Service translates: outside request on :80 → pod's port :8000
+      targetPort: 8000
+
+  # LoadBalancer tells K3d to route external traffic into the cluster.
+  # Combined with --port "8080:80@loadbalancer" used when creating the cluster,
+  # requests to localhost:8080 on your Windows machine reach this Service,
+  # which forwards them to whichever pod is available.
+  type: LoadBalancer

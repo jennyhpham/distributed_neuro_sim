@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: neuro-sim
+  namespace: neuro-sim
+spec:
+  # How many identical copies of the pod to run.
+  # Start with 1, scale up later: kubectl scale deployment neuro-sim --replicas=3 -n neuro-sim
+  replicas: 1
+  # Tells K8s which pods this Deployment owns.
+  # It looks for pods with the label app=neuro-sim.
+  selector:
+    matchLabels:
+      app: neuro-sim
+  template:
+    metadata:
+      # Every pod created by this Deployment gets this label.
+      # The selector above uses this to find its pods.
+      # The Service uses this same label to find pods to send traffic to.
+      labels:
+        app: neuro-sim
+    spec:
+      containers:
+        - name: neuro-sim
+          image: neuro-sim:latest
+          imagePullPolicy: Never
+          # Override the Dockerfile CMD (which runs batch inference).
+          # This starts the FastAPI server instead, listening on all interfaces at port 8000.
+          command: ["uvicorn", "neuro_sim.api.server:app", "--host", "0.0.0.0", "--port", "8000"]
+          ports:
+            - containerPort: 8000
+
+          # Environment variables the server reads at startup (see server.py lines 63-64).
+          # These tell it where the model file and config file are inside the container.
+          env:
+            - name: NEURO_SIM_MODEL
+              value: /app/models/increasing_inhibition_network_400.pt
+            - name: NEURO_SIM_CONFIG
+              value: /app/configs/som_lm_snn.yaml
+
+          # Resource requests: the minimum the pod needs to be scheduled on a node.
+          # Resource limits: the maximum it is allowed to use.
+          # K8s uses these to decide which node has room for the pod.
+          resources:
+            requests:
+              cpu: "500m"      # 500m = half a CPU core
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"     # 1000m = one full CPU core
+              memory: "1Gi"
+
+          # Readiness probe: K8s asks "are you ready to receive traffic?"
+          # Until this passes, the pod is excluded from the Service — no requests are sent to it.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20   # wait 20s after container starts before first check
+            periodSeconds: 5          # check every 5 seconds
+            failureThreshold: 3       # fail 3 times in a row before marking as not ready
+
+          # Liveness probe: K8s asks "are you still alive?"
+          # If this fails, K8s kills the pod and starts a new one automatically.
+          # Catches cases where the server has crashed or frozen.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30   # give more time before first liveness check
+            periodSeconds: 10         # check every 10 seconds
+            failureThreshold: 3       # restart pod after 3 consecutive failures
+
+          volumeMounts:
+            - name: logs
+              mountPath: /data/logs
+
+      volumes:
+        - name: logs
+          persistentVolumeClaim:
+            claimName: neuro-sim-logs
