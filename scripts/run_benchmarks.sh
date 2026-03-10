@@ -41,8 +41,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-URL="http://localhost:${PORT}"
-
 mkdir -p "${OUTPUT_DIR}"
 
 # ---------------------------------------------------------------------------
@@ -50,9 +48,18 @@ mkdir -p "${OUTPUT_DIR}"
 # ---------------------------------------------------------------------------
 
 wait_healthy() {
+  local container_id="$1"
+  local url="$2"
   echo -n "    Waiting for container to be ready"
   for i in $(seq 1 30); do
-    if curl -sf "${URL}/health" > /dev/null 2>&1; then
+    # Fail fast if the container has already exited
+    if ! docker inspect --format '{{.State.Running}}' "${container_id}" 2>/dev/null | grep -q "true"; then
+      echo " EXITED"
+      echo "  Container exited unexpectedly. Logs:" >&2
+      docker logs "${container_id}" 2>&1 | tail -20 >&2
+      return 1
+    fi
+    if curl -sf "${url}/health" > /dev/null 2>&1; then
       echo " OK"
       return 0
     fi
@@ -74,18 +81,30 @@ run_scenario() {
   echo "  Scenario: ${name}"
   echo "============================================================"
 
-  # Start container in background
-  CONTAINER_ID=$(docker run --rm -d \
-    -p "${PORT}:${PORT}" \
+  # Start container — no host-port binding; connect via container IP instead
+  # (required when running inside a devcontainer where localhost != Docker host)
+  # No --rm: we keep the container so we can capture logs even if it exits early
+  CONTAINER_ID=$(docker run -d \
     "${docker_args[@]}" \
     "${IMAGE}")
   echo "  Container: ${CONTAINER_ID:0:12}"
 
+  # Resolve container's bridge IP
+  CONTAINER_IP=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${CONTAINER_ID}")
+  URL="http://${CONTAINER_IP}:${PORT}"
+
   # Wait for healthy or abort
-  if ! wait_healthy; then
-    echo "  ERROR: Container did not become healthy in time."
-    docker stop "${CONTAINER_ID}" > /dev/null 2>&1 || true
-    exit 1
+  if ! wait_healthy "${CONTAINER_ID}" "${URL}"; then
+    OOM=$(docker inspect --format '{{.State.OOMKilled}}' "${CONTAINER_ID}" 2>/dev/null || echo "false")
+    if [[ "${OOM}" == "true" ]]; then
+      echo "  SKIP: Container was OOM-killed — memory limit too low for this workload." >&2
+      echo '{"error":"oom_killed","message":"Container OOM-killed before becoming healthy"}' > "${output}"
+    else
+      echo "  SKIP: Container did not become healthy in time." >&2
+      echo '{"error":"startup_timeout","message":"Container did not become healthy within the wait window"}' > "${output}"
+    fi
+    docker rm -f "${CONTAINER_ID}" > /dev/null 2>&1 || true
+    return 0
   fi
 
   # Run benchmark
@@ -95,10 +114,9 @@ run_scenario() {
     --timeout "${TIMEOUT}" \
     --output-json "${output}"
 
-  # Stop container
+  # Stop and remove container
   echo "  Stopping container..."
-  docker stop "${CONTAINER_ID}" > /dev/null 2>&1 || true
-  # Brief pause to ensure port is freed before next scenario
+  docker rm -f "${CONTAINER_ID}" > /dev/null 2>&1 || true
   sleep 2
 }
 
@@ -113,6 +131,7 @@ echo "Port       : ${PORT}"
 echo "Runs       : ${N_RUNS} per digit × 10 digits = $((N_RUNS * 10)) requests per scenario"
 echo "Timeout    : ${TIMEOUT}s per request"
 echo "Output dir : ${OUTPUT_DIR}/"
+echo "Network    : direct container IP (devcontainer-safe)"
 
 run_scenario \
   "Baseline — no resource limits" \
