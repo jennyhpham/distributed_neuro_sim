@@ -5,24 +5,45 @@
 #
 # Usage:
 #   ./scripts/run_benchmarks.sh
-#   ./scripts/run_benchmarks.sh --n-runs 50   # more requests per digit
+#   ./scripts/run_benchmarks.sh --n-runs 50
+#   ./scripts/run_benchmarks.sh --image neuro-sim:v2 --port 9090 --output-dir results/run1
+#   ./scripts/run_benchmarks.sh --timeout 120 --n-runs 20
 
 set -euo pipefail
 
+# ---------------------------------------------------------------------------
+# Defaults
+# ---------------------------------------------------------------------------
+
 IMAGE="neuro-sim:latest"
 PORT=8000
-URL="http://localhost:${PORT}"
-N_RUNS=${2:-20}  # default 20 runs per digit
+N_RUNS=20
+TIMEOUT=30
+OUTPUT_DIR="results"
 
-# Parse --n-runs flag
-for i in "$@"; do
-  case $i in
-    --n-runs=*) N_RUNS="${i#*=}" ;;
-    --n-runs)   N_RUNS="${2}"; shift ;;
+# ---------------------------------------------------------------------------
+# Argument parsing
+# ---------------------------------------------------------------------------
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --image)       IMAGE="$2";      shift 2 ;;
+    --image=*)     IMAGE="${1#*=}"; shift ;;
+    --port)        PORT="$2";       shift 2 ;;
+    --port=*)      PORT="${1#*=}";  shift ;;
+    --n-runs)      N_RUNS="$2";     shift 2 ;;
+    --n-runs=*)    N_RUNS="${1#*=}"; shift ;;
+    --timeout)     TIMEOUT="$2";    shift 2 ;;
+    --timeout=*)   TIMEOUT="${1#*=}"; shift ;;
+    --output-dir)  OUTPUT_DIR="$2"; shift 2 ;;
+    --output-dir=*) OUTPUT_DIR="${1#*=}"; shift ;;
+    *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
 
-mkdir -p results
+URL="http://localhost:${PORT}"
+
+mkdir -p "${OUTPUT_DIR}"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -71,6 +92,7 @@ run_scenario() {
   python scripts/benchmark.py \
     --url "${URL}" \
     --n-runs "${N_RUNS}" \
+    --timeout "${TIMEOUT}" \
     --output-json "${output}"
 
   # Stop container
@@ -86,26 +108,28 @@ run_scenario() {
 
 echo ""
 echo "neuro-sim Benchmark Suite"
-echo "Image  : ${IMAGE}"
-echo "Runs   : ${N_RUNS} per digit × 10 digits = $((N_RUNS * 10)) requests per scenario"
-echo "Output : results/"
+echo "Image      : ${IMAGE}"
+echo "Port       : ${PORT}"
+echo "Runs       : ${N_RUNS} per digit × 10 digits = $((N_RUNS * 10)) requests per scenario"
+echo "Timeout    : ${TIMEOUT}s per request"
+echo "Output dir : ${OUTPUT_DIR}/"
 
 run_scenario \
   "Baseline — no resource limits" \
-  "results/baseline.json"
+  "${OUTPUT_DIR}/baseline.json"
 
 run_scenario \
   "Edge scenario 1 — SpiNNaker-class (0.25 CPU / 256MB)" \
-  "results/constrained_0.25cpu.json" \
+  "${OUTPUT_DIR}/constrained_0.25cpu.json" \
   --cpus="0.25" --memory="256m" --memory-swap="256m"
 
 run_scenario \
   "Edge scenario 2 — Loihi host-class (0.5 CPU / 512MB)" \
-  "results/constrained_0.5cpu.json" \
+  "${OUTPUT_DIR}/constrained_0.5cpu.json" \
   --cpus="0.5" --memory="512m" --memory-swap="512m"
 
 echo ""
-echo "All scenarios complete. Results saved to results/"
-echo "  results/baseline.json"
-echo "  results/constrained_0.25cpu.json"
-echo "  results/constrained_0.5cpu.json"
+echo "All scenarios complete. Results saved to ${OUTPUT_DIR}/"
+echo "  ${OUTPUT_DIR}/baseline.json"
+echo "  ${OUTPUT_DIR}/constrained_0.25cpu.json"
+echo "  ${OUTPUT_DIR}/constrained_0.5cpu.json"

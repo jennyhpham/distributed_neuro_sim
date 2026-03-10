@@ -1,7 +1,23 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(pip install --quiet fastapi)",
+      "Bash(pip install --break-system-packages --quiet \"fastapi>=0.110.0\" \"uvicorn[standard]>=0.29.0\" \"pillow>=10.0.0\" \"prometheus-fastapi-instrumentator>=7.0.0\")",
+      "Bash(python -c \"from neuro_sim.api.server import app; print\\(''Import OK''\\)\")",
+      "Bash(pip install --break-system-packages --quiet \"python-multipart>=0.0.9\")",
+      "Bash(curl -s -X POST http://localhost:8000/predict -F \"file=@/tmp/test_digit.png\")",
+      "Bash(curl -s http://localhost:8000/metrics)",
+      "Bash(pgrep -f \"uvicorn neuro_sim\")",
+      "Bash(pkill -f \"uvicorn neuro_sim\")",
+      "Bash(fuser -k 8000/tcp)",
+      "Bash(docker info --format \"Docker OK, version: {{.ServerVersion}}\")",
+      "Bash(ls -lh /workspaces/distributed_neuro_sim/models/*.pt)",
+      "Bash(chmod +x /workspaces/distributed_neuro_sim/scripts/run_benchmarks.sh)",
+      "Bash(git -C /workspaces/distributed_neuro_sim status --short)",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(pip install -e . -q)",
+      "Bash(neuro-sim-bench --help)"
     ]
   }
 }

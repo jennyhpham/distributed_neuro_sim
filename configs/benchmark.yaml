@@ -1,0 +1,24 @@
+# Benchmark configuration for neuro-sim inference API
+# All values here are overridable via CLI flags.
+#
+# Usage:
+#   neuro-sim-bench --config configs/benchmark.yaml
+#   neuro-sim-bench --config configs/benchmark.yaml --n-runs 50 --output-json results/run.json
+
+benchmark:
+  # URL of the running neuro-sim server
+  url: "http://localhost:8000"
+
+  # Number of inference requests per digit class (10 digits → n_runs * 10 total requests)
+  n_runs: 20
+
+  # Per-request HTTP timeout in seconds.
+  # Increase this for resource-constrained environments (e.g. K3d edge nodes).
+  # Rule of thumb: constrained node latency * 3
+  timeout: 30
+
+  # Directory used to cache the MNIST test set download
+  data_dir: "/tmp/mnist_benchmark"
+
+  # Path to write the full JSON results file (null = print only, no file saved)
+  output_json: null

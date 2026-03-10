@@ -10,6 +10,7 @@ from pathlib import Path
 from neuro_sim.config import Config
 from neuro_sim.training import Evaluator, Trainer
 from neuro_sim.utils.logging import setup_logger
+from neuro_sim.benchmark import load_config, run_benchmark
 
 
 def train_command(args):
@@ -299,6 +300,89 @@ def infer():
     
     args = parser.parse_args()
     return infer_command(args)
+
+
+def bench_command(args):
+    """Benchmark command."""
+    cfg = load_config(args.config)
+
+    # CLI args override config file values when explicitly provided
+    if args.url is not None:
+        cfg["url"] = args.url
+    if args.n_runs is not None:
+        cfg["n_runs"] = args.n_runs
+    if args.timeout is not None:
+        cfg["timeout"] = args.timeout
+    if args.data_dir is not None:
+        cfg["data_dir"] = args.data_dir
+    if args.output_json is not None:
+        cfg["output_json"] = args.output_json
+
+    run_benchmark(
+        url=cfg["url"],
+        n_runs=cfg["n_runs"],
+        output_json=cfg.get("output_json"),
+        timeout=cfg["timeout"],
+        data_dir=cfg["data_dir"],
+    )
+    return 0
+
+
+def bench():
+    """Benchmark entry point."""
+    parser = argparse.ArgumentParser(
+        description="Benchmark the neuro-sim inference API",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "examples:\n"
+            "  neuro-sim-bench\n"
+            "  neuro-sim-bench --config configs/benchmark.yaml\n"
+            "  neuro-sim-bench --url http://host.docker.internal:9090 --timeout 120\n"
+            "  neuro-sim-bench --config configs/benchmark.yaml --n-runs 50 --output-json results/run.json"
+        ),
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to benchmark config YAML (optional)",
+    )
+    parser.add_argument(
+        "--url",
+        type=str,
+        default=None,
+        help="Base URL of the running server (default: http://localhost:8000)",
+    )
+    parser.add_argument(
+        "--n-runs",
+        type=int,
+        dest="n_runs",
+        default=None,
+        help="Number of requests per digit (default: 10)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=None,
+        help="Per-request timeout in seconds (default: 30)",
+    )
+    parser.add_argument(
+        "--data-dir",
+        type=str,
+        dest="data_dir",
+        default=None,
+        help="Directory for MNIST cache (default: /tmp/mnist_benchmark)",
+    )
+    parser.add_argument(
+        "--output-json",
+        type=str,
+        dest="output_json",
+        metavar="PATH",
+        default=None,
+        help="Save full results to a JSON file",
+    )
+    args = parser.parse_args()
+    return bench_command(args)
 
 
 def main():
