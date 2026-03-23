@@ -62,13 +62,14 @@ spec:
           # Liveness probe: K8s asks "are you still alive?"
           # If this fails, K8s kills the pod and starts a new one automatically.
           # Catches cases where the server has crashed or frozen.
-          livenessProbe:
-            httpGet:
-              path: /health
-              port: 8000
-            initialDelaySeconds: 30   # give more time before first liveness check
-            periodSeconds: 10         # check every 10 seconds
-            failureThreshold: 3       # restart pod after 3 consecutive failures
+          # livenessProbe:
+          #   httpGet:
+          #     path: /health
+          #     port: 8000
+          #   initialDelaySeconds: 30   # give more time before first liveness check
+          #   periodSeconds: 30         # check every 30 seconds
+          #   timeoutSeconds: 10        # wait 10s for a response (was 1s)
+          #   failureThreshold: 10      # restart only after 10 consecutive failures (300s tolerance)
 
           volumeMounts:
             - name: logs
