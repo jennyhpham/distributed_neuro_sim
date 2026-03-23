@@ -281,21 +281,24 @@ K8s automatically spreads pods across the two agent nodes and the Service load b
 
 ## Benchmarking
 
-Two scripts are provided under `scripts/` to measure performance across deployment scenarios.
+Two tools are provided for benchmarking: a single-run CLI (`neuro-sim-bench`) and a multi-scenario Docker orchestrator (`scripts/run_benchmarks.py`). Scenarios are defined in `configs/benchmark.yaml`.
 
-### `scripts/benchmark.py` — single scenario
+### `neuro-sim-bench` — single scenario (against a running server)
 
-Runs N inference requests against a live server and reports latency percentiles, accuracy, and throughput.
+Runs N distinct images per digit against a live server and reports latency percentiles, accuracy, and throughput.
 
 ```bash
 # Against a standalone Docker container
-python scripts/benchmark.py \
+neuro-sim-bench \
   --url http://localhost:8000 \
   --n-runs 20 \
   --output-json results/run.json
 
+# Using config file
+neuro-sim-bench --config configs/benchmark.yaml
+
 # Against the K3d deployment (port-forward must be running)
-python scripts/benchmark.py \
+neuro-sim-bench \
   --url http://host.docker.internal:9090 \
   --n-runs 20 \
   --output-json results/k8s_1pod.json
@@ -303,8 +306,9 @@ python scripts/benchmark.py \
 
 | Flag | Default | Description |
 | --- | --- | --- |
+| `--config` | *(none)* | Path to benchmark YAML config |
 | `--url` | `http://localhost:8000` | Base URL of the running API server |
-| `--n-runs` | `10` | Number of inference requests per digit class (×10 digits = total requests) |
+| `--n-runs` | `10` | Distinct images per digit class (×10 digits = total requests) |
 | `--output-json` | *(none)* | Optional path to write full results as JSON |
 
 **Output includes:**
@@ -315,24 +319,34 @@ python scripts/benchmark.py \
 - Throughput (requests/second)
 - Per-digit spike counts
 
-### `scripts/run_benchmarks.sh` — all three Docker scenarios automated
+### `scripts/run_benchmarks.py` — all scenarios automated
 
-Builds and runs all three standalone Docker scenarios back-to-back, saves results to `results/`. Designed for the resource-constraint experiment (not K3d).
+Reads scenarios from `configs/benchmark.yaml`, starts a fresh Docker container per scenario with the configured resource limits, runs the full benchmark, then removes the container. Uses bridge IP resolution so it works correctly inside a devcontainer.
 
 ```bash
-# Default: 20 runs per digit per scenario
-./scripts/run_benchmarks.sh
+# Default config (configs/benchmark.yaml)
+python scripts/run_benchmarks.py
 
 # Custom run count
-./scripts/run_benchmarks.sh --n-runs 50
+python scripts/run_benchmarks.py --n-runs 50
+
+# Custom output directory
+python scripts/run_benchmarks.py --output-dir results/run1
 ```
 
-Scenarios run in order:
-1. **Baseline** — no resource limits → `results/baseline.json`
-2. **0.5 CPU / 512 MB** — Loihi host-class → `results/constrained_0.5cpu.json`
-3. **0.25 CPU / 256 MB** — SpiNNaker-class → `results/constrained_0.25cpu.json`
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--config` | `configs/benchmark.yaml` | Path to benchmark YAML config |
+| `--n-runs` | from config | Override images per digit |
+| `--timeout` | from config | Override per-request timeout (s) |
+| `--output-dir` | from config | Override results output directory |
 
-The script handles container startup, health-check polling, and teardown automatically between scenarios.
+Scenarios are defined in `configs/benchmark.yaml` under `benchmark.scenarios`. Each scenario can specify optional Docker resource limits (`cpus`, `memory`, `memory_swap`). A scenario without a `docker:` key runs with no limits (baseline).
+
+Default scenarios:
+1. **Baseline** — no resource limits → `results/baseline.json`
+2. **SpiNNaker-class** — 0.25 CPU / 256 MB → `results/constrained_0.25cpu.json`
+3. **Loihi host-class** — 0.5 CPU / 512 MB → `results/constrained_0.5cpu.json`
 
 ---
 
@@ -406,8 +420,7 @@ distributed-neuro-sim/
 │   ├── deployment.yaml             # Always-running API deployment
 │   └── service.yaml                # LoadBalancer service
 ├── scripts/
-│   ├── benchmark.py                # Single-scenario latency/accuracy benchmark
-│   └── run_benchmarks.sh           # Automated multi-scenario benchmark runner
+│   └── run_benchmarks.py           # Automated multi-scenario benchmark runner (reads benchmark.yaml)
 ├── results/                        # Benchmark output JSON files
 ├── configs/
 │   ├── default.yaml                # DiehlAndCook2015 config

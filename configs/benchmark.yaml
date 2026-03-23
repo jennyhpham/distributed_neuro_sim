@@ -1,15 +1,19 @@
 # Benchmark configuration for neuro-sim inference API
 # All values here are overridable via CLI flags.
 #
-# Usage:
+# Single-run usage (neuro-sim-bench targets a running server directly):
 #   neuro-sim-bench --config configs/benchmark.yaml
 #   neuro-sim-bench --config configs/benchmark.yaml --n-runs 50 --output-json results/run.json
+#
+# Multi-scenario suite usage (starts/stops Docker containers automatically):
+#   python scripts/run_benchmarks.py
+#   python scripts/run_benchmarks.py --config configs/benchmark.yaml --n-runs 50
 
 benchmark:
-  # URL of the running neuro-sim server
+  # URL of the running neuro-sim server (used by neuro-sim-bench for single-run mode)
   url: "http://localhost:8000"
 
-  # Number of inference requests per digit class (10 digits → n_runs * 10 total requests)
+  # Number of distinct images per digit class (10 digits → n_runs * 10 total requests)
   n_runs: 20
 
   # Per-request HTTP timeout in seconds.
@@ -21,4 +25,39 @@ benchmark:
   data_dir: "/tmp/mnist_benchmark"
 
   # Path to write the full JSON results file (null = print only, no file saved)
+  # Only used in single-run mode. In suite mode, each scenario defines its own output.
   output_json: null
+
+  # ---------------------------------------------------------------------------
+  # Suite mode: Docker image + scenarios (used by scripts/run_benchmarks.py)
+  # ---------------------------------------------------------------------------
+
+  # Docker image to run for each scenario
+  image: "neuro-sim:latest"
+
+  # Port the container listens on
+  port: 8000
+
+  # Directory to write per-scenario result JSON files
+  output_dir: "results"
+
+  # Benchmark scenarios. Each scenario starts a fresh container, runs the full
+  # benchmark suite, then removes the container.
+  # docker: key is optional — omit it for no resource limits (baseline).
+  scenarios:
+    - name: "Baseline — no resource limits"
+      output: "baseline.json"
+
+    - name: "Edge scenario 1 — SpiNNaker-class (0.25 CPU / 256 MB)"
+      output: "constrained_0.25cpu.json"
+      docker:
+        cpus: "0.25"
+        memory: "256m"
+        memory_swap: "256m"   # equal to memory → no swap allowed
+
+    - name: "Edge scenario 2 — Loihi host-class (0.5 CPU / 512 MB)"
+      output: "constrained_0.5cpu.json"
+      docker:
+        cpus: "0.5"
+        memory: "512m"
+        memory_swap: "512m"   # equal to memory → no swap allowed

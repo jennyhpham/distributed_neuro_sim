@@ -109,9 +109,6 @@ def run_benchmark(
     timeout: int = 30,
     data_dir: str = "/tmp/mnist_benchmark",
 ) -> dict:
-    print(f"\n{'='*60}")
-    print(f"  neuro-sim SNN Inference Benchmark")
-    print(f"{'='*60}")
     print(f"  Target : {url}")
     print(f"  Runs   : {n_runs} images per digit × 10 digits = {n_runs * 10} total requests")
     print(f"  Timeout: {timeout}s per request")
@@ -197,9 +194,9 @@ def run_benchmark(
     p99 = percentile(all_latencies, 99)
     overhead = p50 - sim_time_ms
 
-    print(f"\n{'='*60}")
+    print(f"\n  {'─'*56}")
     print(f"  RESULTS SUMMARY")
-    print(f"{'='*60}")
+    print(f"  {'─'*56}")
     print(f"  Accuracy (proportion-weighting) : {correct_proportion}/{total} = {correct_proportion/total*100:.0f}%")
     print(f"  Accuracy (all-activity)         : {correct_all_activity}/{total} = {correct_all_activity/total*100:.0f}%")
     print(f"\n  Latency (wall-clock per request):")
@@ -212,7 +209,7 @@ def run_benchmark(
     print(f"  Orchestration overhead (p50)    : {overhead:.1f} ms  [= p50 - floor]")
     print(f"\n  Total wall time : {wall_elapsed:.1f}s for {len(all_latencies)} requests")
     print(f"  Throughput      : {len(all_latencies)/wall_elapsed:.2f} req/s")
-    print(f"{'='*60}\n")
+    print(f"  {'─'*56}\n")
 
     output = {
         "config": {
