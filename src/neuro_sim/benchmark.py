@@ -15,7 +15,6 @@ from typing import Optional
 
 import requests
 import yaml
-from PIL import Image
 from torchvision.datasets import MNIST
 from torchvision import transforms
 
@@ -55,8 +54,8 @@ def load_config(config_path: Optional[str] = None) -> dict:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def load_one_per_digit(data_dir: str) -> list[dict]:
-    """Return one (image_bytes, true_label) per digit class 0–9 from MNIST test set."""
+def load_n_per_digit(data_dir: str, n: int) -> dict[int, list[bytes]]:
+    """Return up to n image_bytes per digit class 0–9 from MNIST test set."""
     dataset = MNIST(
         root=data_dir,
         train=False,
@@ -64,17 +63,17 @@ def load_one_per_digit(data_dir: str) -> list[dict]:
         transform=transforms.ToTensor(),
     )
 
-    samples = {}
+    samples: dict[int, list[bytes]] = {i: [] for i in range(10)}
     for img_tensor, label in dataset:
-        if label not in samples:
+        if len(samples[label]) < n:
             pil_img = transforms.ToPILImage()(img_tensor)
             buf = io.BytesIO()
             pil_img.save(buf, format="PNG")
-            samples[label] = {"image_bytes": buf.getvalue(), "label": label}
-        if len(samples) == 10:
+            samples[label].append(buf.getvalue())
+        if all(len(v) == n for v in samples.values()):
             break
 
-    return [samples[i] for i in range(10)]
+    return samples
 
 
 def check_health(url: str) -> dict:
@@ -114,7 +113,7 @@ def run_benchmark(
     print(f"  neuro-sim SNN Inference Benchmark")
     print(f"{'='*60}")
     print(f"  Target : {url}")
-    print(f"  Runs   : {n_runs} per digit × 10 digits = {n_runs * 10} total requests")
+    print(f"  Runs   : {n_runs} images per digit × 10 digits = {n_runs * 10} total requests")
     print(f"  Timeout: {timeout}s per request")
 
     # Health check
@@ -134,11 +133,12 @@ def run_benchmark(
 
     # Load MNIST samples
     print("\n[2/3] Loading MNIST test samples...", end=" ", flush=True)
-    samples = load_one_per_digit(data_dir)
-    print(f"OK ({len(samples)} images, one per digit class)")
+    samples_by_digit = load_n_per_digit(data_dir, n_runs)
+    actual_n = min(len(v) for v in samples_by_digit.values())
+    print(f"OK ({actual_n} images per digit × 10 classes = {actual_n * 10} total)")
 
     # Run benchmark
-    print(f"\n[3/3] Running {n_runs * 10} requests...\n")
+    print(f"\n[3/3] Running {actual_n * 10} requests...\n")
 
     results = []
     all_latencies = []
@@ -148,31 +148,32 @@ def run_benchmark(
 
     wall_start = time.perf_counter()
 
-    for sample in samples:
-        label = sample["label"]
+    for label in range(10):
         latencies = []
         spike_counts = []
+        digit_correct_proportion = 0
+        digit_correct_all_activity = 0
 
-        for run in range(n_runs):
-            result = predict(url, sample["image_bytes"], timeout=timeout)
+        for image_bytes in samples_by_digit[label]:
+            result = predict(url, image_bytes, timeout=timeout)
             latencies.append(result["inference_time_ms"])
             spike_counts.append(result["spike_count"])
-
-            if run == 0:  # Only count accuracy once per digit
-                if result["digit"] == label:
-                    correct_proportion += 1
-                if result["all_activity_digit"] == label:
-                    correct_all_activity += 1
-                total += 1
-
             all_latencies.append(result["inference_time_ms"])
 
+            if result["digit"] == label:
+                correct_proportion += 1
+                digit_correct_proportion += 1
+            if result["all_activity_digit"] == label:
+                correct_all_activity += 1
+                digit_correct_all_activity += 1
+            total += 1
+
+        n_digit = len(latencies)
         results.append({
             "digit": label,
-            "predicted_proportion": result["digit"],
-            "predicted_all_activity": result["all_activity_digit"],
-            "correct_proportion": result["digit"] == label,
-            "correct_all_activity": result["all_activity_digit"] == label,
+            "n_images": n_digit,
+            "accuracy_proportion": round(digit_correct_proportion / n_digit, 4),
+            "accuracy_all_activity": round(digit_correct_all_activity / n_digit, 4),
             "latency_ms": {
                 "min": round(min(latencies), 2),
                 "mean": round(statistics.mean(latencies), 2),
@@ -181,11 +182,10 @@ def run_benchmark(
             "mean_spike_count": round(statistics.mean(spike_counts), 1),
         })
 
-        status = "✓" if result["digit"] == label else "✗"
         print(
-            f"  Digit {label}: {status} predicted={result['digit']} "
-            f"| latency mean={statistics.mean(latencies):.1f}ms "
-            f"| spikes mean={statistics.mean(spike_counts):.1f}"
+            f"  Digit {label}: acc={digit_correct_proportion}/{n_digit}"
+            f" | latency mean={statistics.mean(latencies):.1f}ms"
+            f" | spikes mean={statistics.mean(spike_counts):.1f}"
         )
 
     wall_elapsed = time.perf_counter() - wall_start
@@ -217,7 +217,7 @@ def run_benchmark(
     output = {
         "config": {
             "url": url,
-            "n_runs_per_digit": n_runs,
+            "n_images_per_digit": actual_n,
             "total_requests": len(all_latencies),
             "model": health["model"],
             "n_neurons": health["n_neurons"],
