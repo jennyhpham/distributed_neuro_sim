@@ -56,8 +56,9 @@ spec:
               path: /health
               port: 8000
             initialDelaySeconds: 20   # wait 20s after container starts before first check
-            periodSeconds: 5          # check every 5 seconds
-            failureThreshold: 3       # fail 3 times in a row before marking as not ready
+            periodSeconds: 10         # check every 10 seconds
+            failureThreshold: 6       # tolerate 60s of missed probes before marking unready
+            timeoutSeconds: 10        # wait up to 10s for a probe response
 
           # Liveness probe: K8s asks "are you still alive?"
           # If this fails, K8s kills the pod and starts a new one automatically.

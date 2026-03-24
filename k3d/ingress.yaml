@@ -1,0 +1,20 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: neuro-sim
+  namespace: neuro-sim
+  annotations:
+    # Tell Traefik to strip any path prefix before forwarding to the service.
+    # Without this, / would be forwarded as / which is fine for our case.
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: neuro-sim-svc
+                port:
+                  number: 80
